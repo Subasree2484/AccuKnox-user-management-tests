@@ -1,0 +1,143 @@
+AUTOMATION SCRIPT- Playwright- Python as a Script language
+# user_management_test.py
+import pytest
+from playwright.sync_api import Page, expect
+
+# --- Single User Data for All Tests ---
+TEST_USER = {
+    "role": "ESS",
+    "employee_name": "Cecil Bonnet",
+    "status": "Enabled",
+    "username": "Deepan.qa.testuser",
+    "password": "DR@1408s"
+}
+
+MISMATCH_USER = {
+    "username": "Suba.qa.fail",
+    "password": "Suba@2484",
+    "confirm_password": "Suba@2494"
+}
+
+# Page Object 
+class AdminPage:
+    def __init__(self, page: Page):
+        self.page = page
+        # Login selectors
+        self.username_input = "input[name='username']"
+        self.password_input = "input[name='password']"
+        self.submit_button = "button[type='submit']"
+        # Admin & User Management selectors
+        self.admin_tab = "a[href*='admin']"
+        self.add_button = "button:has-text('Add')"
+        self.user_role_select = "div:has-text('User Role') + div select"
+        self.employee_name_input = "input[placeholder='Type for hints...']"
+        self.status_select = "div:has-text('Status') + div select"
+        self.user_name_input = "input[name='username']"
+        self.new_password_input = "div:has-text('Password') + div input[type='password']"
+        self.confirm_password_input = "div:has-text('Confirm Password') + div input[type='password']"
+        self.search_input = "div:has-text('Username') input"
+        self.search_button = "button:has-text('Search')"
+        self.delete_confirm_button = "button:has-text('Yes, Delete')"
+        self.no_records_found = "text=No Records Found"
+
+    # Login Method 
+    def login(self, admin_username, admin_password):
+        # Open the login page
+        self.page.goto("https://opensource-demo.orangehrmlive.com/web/index.php/auth/login")
+        # Fill username & password
+        self.page.fill(self.username_input, admin_username)
+        self.page.fill(self.password_input, admin_password)
+        # Click Login
+        self.page.click(self.submit_button)
+        # Wait for dashboard to appear
+        expect(self.page.locator("text=Dashboard")).to_be_visible(timeout=5000)
+
+    #Navigate to Admin Section 
+    def go_admin(self):
+        self.page.click(self.admin_tab)
+        expect(self.page.locator("h6:has-text('User Management')")).to_be_visible(timeout=5000)
+
+    # Add User 
+    def add_user(self, user_data, expect_success=True):
+        self.page.click(self.add_button)
+        self.page.select_option(self.user_role_select, user_data['role'])
+        self.page.fill(self.employee_name_input, user_data['employee_name'])
+        # Wait for employee auto-suggestion
+        self.page.wait_for_selector(f"text={user_data['employee_name']}")
+        self.page.press(self.employee_name_input, "ArrowDown")
+        self.page.press(self.employee_name_input, "Enter")
+        self.page.select_option(self.status_select, user_data['status'])
+        self.page.fill(self.user_name_input, user_data['username'])
+        self.page.fill(self.new_password_input, user_data['password'])
+        # Confirm password
+        self.page.fill(self.confirm_password_input, user_data.get('confirm_password', user_data['password']))
+        self.page.click(self.submit_button)
+        if expect_success:
+            expect(self.page.locator("text=Successfully Saved")).to_be_visible(timeout=5000)
+
+    #  Search User 
+    def search_user(self, username, expected_status=None):
+        self.page.fill(self.search_input, username)
+        self.page.click(self.search_button)
+        user_row = self.page.locator(f"tr:has-text('{username}')")
+        if expected_status:
+            expect(user_row.locator(f"text={expected_status}")).to_be_visible(timeout=5000)
+        else:
+            expect(user_row).to_be_visible(timeout=5000)
+        return user_row
+
+    #  Edit User Status 
+    def edit_user(self, username, new_status):
+        row = self.search_user(username)
+        row.locator("button:has-text('Edit')").click()
+        self.page.select_option(self.status_select, new_status)
+        self.page.click(self.submit_button)
+        expect(self.page.locator("text=Successfully Updated")).to_be_visible(timeout=5000)
+
+    # Delete User 
+    def delete_user(self, username):
+        row = self.search_user(username)
+        row.locator("button:has-text('Delete')").click()
+        self.page.click(self.delete_confirm_button)
+        expect(self.page.locator("text=Successfully Deleted")).to_be_visible(timeout=5000)
+        # Confirm deletion
+        self.page.fill(self.search_input, username)
+        self.page.click(self.search_button)
+        expect(self.page.locator(self.no_records_found)).to_be_visible(timeout=5000)
+
+# Pytest Fixture 
+@pytest.fixture(scope="session")
+def admin_page(playwright):
+    # Open browser
+    browser = playwright.chromium.launch(headless=False)
+    page = browser.new_page()
+    admin = AdminPage(page)
+    # Login once for all tests
+    admin.login(admin_username="Admin", admin_password="admin@123")
+    yield admin
+    browser.close()
+
+# Test Cases 
+
+def test_create_user(admin_page):
+    """Create a new user and verify it appears in search"""
+    admin_page.go_admin()
+    admin_page.add_user(TEST_USER)
+    admin_page.search_user(TEST_USER['username'])
+
+def test_edit_user_status(admin_page):
+    """Edit the status of the existing user and verify update"""
+    admin_page.go_admin()
+    admin_page.edit_user(TEST_USER['username'], new_status="Disabled")
+    admin_page.search_user(TEST_USER['username'], expected_status="Disabled")
+
+def test_password_mismatch(admin_page):
+    """Attempt to create a user with mismatched password and verify error"""
+    admin_page.go_admin()
+    admin_page.add_user(MISMATCH_USER, expect_success=False)
+    expect(admin_page.page.locator("text=Passwords do not match")).to_be_visible(timeout=5000)
+
+def test_delete_user(admin_page):
+    """Delete the existing user and verify they are removed"""
+    admin_page.go_admin()
+    admin_page.delete_user(TEST_USER['username'])
