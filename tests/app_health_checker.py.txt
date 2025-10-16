@@ -1,0 +1,20 @@
+#app_health_checker.py
+
+import requests
+
+
+
+URL ="https://opensource-demo.orangehrmlive.com/web/index.php/auth/login"
+
+def check_app_health(url):
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            print(f"Application is UP. Status Code: {response.status_code}")
+        else:
+            print(f"Application is DOWN. Status Code: {response.status_code}")
+    except requests.exceptions.RequestException:
+        print("Application is DOWN. Could not reach the server.")
+
+if __name__ == "__main__":
+    check_app_health(URL)
